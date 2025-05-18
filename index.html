@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secrete Message </title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; background-color: #f4f4f4; }
+        .container { background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h2, h3 { color: #333; }
+        label { display: block; margin-top: 10px; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="password"], textarea {
+            width: calc(100% - 22px); padding: 10px; margin-bottom: 10px;
+            border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff; color: white; padding: 10px 15px; border: none;
+            border-radius: 4px; cursor: pointer; font-size: 16px; margin-right: 10px;
+            margin-top: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button.secondary { background-color: #6c757d; }
+        button.secondary:hover { background-color: #545b62; }
+        #qrCodeOutput img { border: 1px solid #ccc; padding: 5px; background-color: white; max-width: 100%; height: auto;}
+        .output-area {
+            background-color: #e9ecef; padding: 10px; border-radius: 4px;
+            font-family: monospace; word-wrap: break-word; white-space: pre-wrap;
+            margin-top: 10px; min-height: 30px;
+        }
+        .error { color: red; font-weight: bold; }
+        .success { color: green; font-weight: bold; }
+        hr { margin: 30px 0; }
+        .output-container { display: flex; align-items: flex-start; gap: 10px; }
+        .output-container .output-area { flex-grow: 1; }
+        .small-note { font-size: 0.85em; color: #555; margin-top: 5px; }
+
+        /* Styles for the Receiver/Decryptor section */
+        #decryptorSection .hidden { display: none; }
+        #decryptorSection .container {
+             background-color: #e9f5ff; /* Different background for clarity */
+             border: 1px solid #b3d7ff;
+        }
+         #decryptorSection label, #decryptorSection h2, #decryptorSection h3 {
+            color: #004085; /* Different color */
+        }
+        #decryptorSection button {
+             background-color: #28a745; /* Green button */
+        }
+         #decryptorSection button:hover {
+             background-color: #218838;
+        }
+         #decryptedMessageOutput {
+            background-color: #d4edda; /* Light green */
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script> <!-- Optional: for compression -->
+</head>
+<body>
+
+    <div id="generatorSection" class="container">
+        <h2>Part 1: Generate Encrypted QR Link (Sender)</h2>
+        <label for="secretMessage">Secret Message:</label>
+        <textarea id="secretMessage" rows="3" placeholder="Enter your secret message here"></textarea>
+
+        <label for="encryptionPassword">Password for Encryption:</label>
+        <input type="password" id="encryptionPassword" placeholder="Choose a strong password">
+
+        <button onclick="encryptAndGenerateQRLink()">Generate Encrypted QR Link</button>
+        <button class="secondary" onclick="clearSenderForm()">Clear Sender Form</button>
+
+        <h3>Generated QR Code (Scan This):</h3>
+        <div id="qrCodeOutput"></div>
+
+        <h3>Generated Link (This is what's in the QR):</h3>
+         <p class="small-note">Share the QR code or this link. Provide the password separately.</p>
+        <div class="output-container">
+            <div id="generatedLinkOutput" class="output-area"></div>
+             <button id="copyLinkBtn" class="secondary" onclick="copyGeneratedLink()" style="display: none;">Copy Link</button>
+        </div>
+
+        <div id="senderStatus" style="margin-top:10px;"></div>
+    </div>
+
+    <hr>
+
+    <div id="decryptorSection" class="container">
+        <h2>Part 2: Decrypt Message from QR Link (Receiver)</h2>
+        <div id="decryptPasswordSection">
+             <p>Enter the password to decrypt the message from the QR code.</p>
+            <label for="decryptionPassword">Password:</label>
+            <input type="password" id="decryptionPassword" placeholder="Enter password">
+            <button onclick="attemptDecryptionFromUI()">Decrypt Message</button>
+             <div id="receiverStatus" style="margin-top:10px;"></div>
+        </div>
+
+        <div id="decryptedMessageContainer" class="hidden">
+             <h3>Decrypted Message:</h3>
+             <div id="decryptedMessageOutput" class="output-area"></div>
+             <button class="secondary" onclick="clearReceiverForm()">Clear Decrypted</button>
+         </div>
+    </div>
+
+     <div class="container" style="font-size: 0.9em; color: #555;">
+        <h3>How this works:</h3>
+        <ol>
+            <li><strong>Sender (Part 1):</strong> Enters message and password. The message is <em>encrypted</em> (using AES-GCM with a salt and IV derived from the password and random values).</li>
+            <li>A unique URL is created, pointing to this *same page* (or a dedicated decrypt page), with the encrypted data (salt + IV + ciphertext, Base64 encoded, possibly compressed) added as a parameter to the URL (e.g., `?data=...`).</li>
+            <li>A QR code is generated for <strong>this URL</strong>.</li>
+            <li>The sender shares the QR code and the password (separately) with the receiver.</li>
+            <li><strong>Receiver (Part 2):</strong> Scans the QR code. Their browser opens the generated URL.</li>
+            <li>When the page loads, it checks the URL for the encrypted data parameter.</li>
+            <li>It presents a password prompt. The receiver enters the password provided by the sender.</li>
+            <li>If the password is correct, the page uses the password and the data from the URL to derive the key and attempt decryption. If successful, the original message is displayed.</li>
+        </ol>
+         <p><strong>Security Note:</strong> This method relies on strong encryption (AES-GCM) and the secrecy of your password. The encrypted data and the decryption logic are in the page's source, but the password is required to make sense of the data. Use a strong, unique password and share it securely. This is much more secure than putting unencrypted data in the QR or using client-side obfuscation only.</p>
+    </div>
+
+
+    <script>
+        const qrCodeOutputDiv = document.getElementById('qrCodeOutput');
+        const generatedLinkOutput = document.getElementById('generatedLinkOutput');
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
+        const senderStatus = document.getElementById('senderStatus');
+
+        const decryptorSection = document.getElementById('decryptorSection');
+        const passwordInputReceiver = document.getElementById('decryptionPassword');
+        const receiverStatus = document.getElementById('receiverStatus');
+        const decryptedMessageContainer = document.getElementById('decryptedMessageContainer');
+        const decryptedMessageOutput = document.getElementById('decryptedMessageOutput');
+         const decryptPasswordSection = document.getElementById('decryptPasswordSection');
+
+
+        let qrCodeInstance = null;
+        const SALT_LENGTH = 16; // bytes
+        const IV_LENGTH = 12;   // bytes for AES-GCM
+
+        // --- Helper Functions ---
+        function strToArrayBuffer(str) { return new TextEncoder().encode(str); }
+        function arrayBufferToStr(buffer) { return new TextDecoder().decode(buffer); }
+        function arrayBufferToBase64(buffer) {
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)));
+        }
+        function base64ToArrayBuffer(base64) {
+            try {
+                const binary_string = atob(base64);
+                const len = binary_string.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binary_string.charCodeAt(i);
+                }
+                return bytes.buffer;
+            } catch (e) {
+                 console.error("Base64 decoding failed:", e);
+                 return null; // Return null on error
+            }
+        }
+
+        function concatBuffers(...buffers) {
+            const totalLength = buffers.reduce((acc, curr) => acc + curr.byteLength, 0);
+            const result = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const buffer of buffers) {
+                result.set(new Uint8Array(buffer), offset);
+                offset += buffer.byteLength;
+            }
+            return result.buffer;
+        }
+
+         // --- Cryptography Functions ---
+        async function getKey(password, salt) {
+            const keyMaterial = await crypto.subtle.importKey(
+                "raw", strToArrayBuffer(password), { name: "PBKDF2" }, false, ["deriveKey"]
+            );
+            return crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+                keyMaterial, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptMessage(message, password) {
+             try {
+                // Optional: Compress the message
+                 const compressedMessage = pako.gzip(strToArrayBuffer(message)); // Use pako for gzip
+
+                const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+                const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+
+                const key = await getKey(password, salt);
+                const ciphertext = await crypto.subtle.encrypt(
+                    { name: "AES-GCM", iv: iv }, key, compressedMessage
+                );
+
+                // Bundle salt (16) + IV (12) + ciphertext
+                const combinedBuffer = concatBuffers(salt.buffer, iv.buffer, ciphertext);
+                const base64Encoded = arrayBufferToBase64(combinedBuffer);
+
+                return base64Encoded; // Return the Base64 string
+
+             } catch (error) {
+                 console.error("Encryption failed:", error);
+                 throw error; // Re-throw to be caught by the caller
+             }
+        }
+
+
+        async function decryptMessage(base64Data, password) {
+            if (!base64Data || !password) {
+                 throw new Error("Data and password are required for decryption.");
+            }
+
+             try {
+                // Base64 decode the combined buffer
+                 const combinedBuffer = base64ToArrayBuffer(base64Data);
+                 if (!combinedBuffer) {
+                     throw new Error("Invalid Base64 data provided.");
+                 }
+
+
+                // Split into salt, IV, and ciphertext
+                if (combinedBuffer.byteLength < SALT_LENGTH + IV_LENGTH) {
+                    throw new Error("Data too short to contain salt, IV, and ciphertext.");
+                }
+                const salt = combinedBuffer.slice(0, SALT_LENGTH);
+                const iv = combinedBuffer.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+                const ciphertext = combinedBuffer.slice(SALT_LENGTH + IV_LENGTH);
+
+                // Derive key and decrypt
+                const key = await getKey(password, new Uint8Array(salt));
+                const decryptedCompressedBuffer = await crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: new Uint8Array(iv) }, key, ciphertext
+                );
+
+                // Decompress the decrypted data
+                 const decompressedBuffer = pako.ungzip(new Uint8Array(decryptedCompressedBuffer)); // Use pako ungzip
+
+                return arrayBufferToStr(decompressedBuffer); // Return the decrypted string
+
+             } catch (error) {
+                 console.error("Decryption failed:", error);
+                  if (error.message.includes("operation-specific reason") || error.message.includes("Tag mismatch") || error.message.includes("incorrect header check")) {
+                     throw new Error("Decryption failed. Likely incorrect password, corrupted data, or decompression error.");
+                } else {
+                     throw error;
+                }
+             }
+        }
+
+
+        // --- Sender Side Logic ---
+        async function encryptAndGenerateQRLink() {
+            const secretMessage = document.getElementById('secretMessage').value;
+            const password = document.getElementById('encryptionPassword').value;
+
+            senderStatus.textContent = '';
+            generatedLinkOutput.textContent = '';
+            qrCodeOutputDiv.innerHTML = '';
+            copyLinkBtn.style.display = 'none';
+
+            if (!secretMessage || !password) {
+                senderStatus.className = 'error';
+                senderStatus.textContent = "Please enter a message and a password.";
+                return;
+            }
+
+            try {
+                senderStatus.className = '';
+                senderStatus.textContent = 'Encrypting message...';
+                const encryptedData = await encryptMessage(secretMessage, password);
+
+                // Get the current page URL (this is the decryptor page)
+                const currentPageUrl = window.location.href.split('?')[0]; // Remove existing query params
+
+                // Construct the full URL with the encrypted data as a parameter
+                const generatedUrl = `${currentPageUrl}?data=${encodeURIComponent(encryptedData)}`;
+
+                generatedLinkOutput.textContent = generatedUrl;
+
+                if (qrCodeInstance) {
+                    qrCodeInstance.clear();
+                }
+                qrCodeInstance = new QRCode(qrCodeOutputDiv, {
+                    text: generatedUrl, // QR code contains the URL
+                    width: 256,
+                    height: 256,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+                senderStatus.className = 'success';
+                senderStatus.textContent = "Encrypted URL generated and QR code created!";
+                copyLinkBtn.style.display = 'inline-block';
+
+            } catch (error) {
+                console.error("Generation error:", error);
+                senderStatus.className = 'error';
+                senderStatus.textContent = "Failed to generate QR link: " + error.message;
+            }
+        }
+
+        function copyGeneratedLink() {
+            const dataToCopy = generatedLinkOutput.textContent;
+            if (dataToCopy && navigator.clipboard) {
+                navigator.clipboard.writeText(dataToCopy).then(() => {
+                    const originalText = copyLinkBtn.textContent;
+                    copyLinkBtn.textContent = 'Copied!';
+                    // Keep senderStatus related to encryption success
+                    setTimeout(() => { copyLinkBtn.textContent = originalText; }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                    alert('Failed to copy. Please copy manually.');
+                });
+            } else {
+                 alert('Clipboard API not available or no data. Please copy manually.');
+            }
+        }
+
+        function clearSenderForm() {
+            document.getElementById('secretMessage').value = '';
+            document.getElementById('encryptionPassword').value = '';
+            generatedLinkOutput.textContent = '';
+            senderStatus.textContent = '';
+            qrCodeOutputDiv.innerHTML = '';
+            copyLinkBtn.style.display = 'none';
+            if (qrCodeInstance) qrCodeInstance.clear();
+        }
+
+        // --- Receiver Side Logic ---
+
+        // Function to attempt decryption triggered by UI button
+        async function attemptDecryptionFromUI() {
+             const password = passwordInputReceiver.value;
+             const encryptedData = new URLSearchParams(window.location.search).get('data'); // Get data from URL
+
+             if (!encryptedData) {
+                 receiverStatus.className = 'error';
+                 receiverStatus.textContent = 'Error: No encrypted data found in the URL.';
+                 console.error('Decryption attempt failed: No data in URL');
+                 return;
+             }
+
+             receiverStatus.textContent = 'Attempting decryption...';
+             receiverStatus.className = ''; // Clear previous status class
+
+             try {
+                 const originalMessage = await decryptMessage(encryptedData, password);
+                 decryptedMessageOutput.textContent = originalMessage;
+                 receiverStatus.className = 'success';
+                 receiverStatus.textContent = "Message decrypted successfully!";
+                 decryptPasswordSection.classList.add('hidden');
+                 decryptedMessageContainer.classList.remove('hidden');
+             } catch (error) {
+                 console.error("Decryption error:", error);
+                 decryptedMessageOutput.textContent = ''; // Clear any previous message
+                 receiverStatus.className = 'error';
+                 receiverStatus.textContent = error.message || "An unknown decryption error occurred.";
+                 passwordInputReceiver.value = ''; // Clear password field on failure
+                 passwordInputReceiver.focus();
+             }
+        }
+
+        function clearReceiverForm() {
+            decryptedMessageOutput.textContent = '';
+            decryptedMessageContainer.classList.add('hidden');
+            decryptPasswordSection.classList.remove('hidden');
+            passwordInputReceiver.value = '';
+            receiverStatus.textContent = '';
+             passwordInputReceiver.focus();
+        }
+
+
+        // --- Page Initialization ---
+        function initializePage() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const encryptedData = urlParams.get('data');
+
+            if (encryptedData) {
+                // Data found in URL - this is the Receiver experience
+                document.getElementById('generatorSection').style.display = 'none'; // Hide sender part
+                decryptorSection.style.display = 'block'; // Ensure receiver part is shown (it is by default, but good practice)
+                 // The encrypted data input is implicitly populated by the URL parameter itself
+                 // The user just needs to enter the password
+                 passwordInputReceiver.focus(); // Focus the password input
+            } else {
+                // No data in URL - this is the Sender experience (or receiver opening directly)
+                 document.getElementById('generatorSection').style.display = 'block';
+                 decryptorSection.style.display = 'none'; // Hide receiver part initially
+            }
+
+             // Allow pressing Enter key in the password field to trigger decryption
+            passwordInputReceiver.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    attemptDecryptionFromUI();
+                }
+            });
+        }
+
+        // Run initialization when the page loads
+        window.addEventListener('load', initializePage);
+
+    </script>
+
+</body>
+</html>
